@@ -96,4 +96,5 @@ module.exports = {
   getPassword,
   checkPassword,
   getSRPParams,
+  mtproto,
 };

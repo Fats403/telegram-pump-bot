@@ -19,7 +19,10 @@
   "homepage": "https://github.com/Fats403/telegram-pump-bot#readme",
   "dependencies": {
     "@mtproto/core": "5.3.0",
+    "bignumber.js": "9.0.1",
+    "ccxt": "1.42.99",
     "dotenv": "8.2.0",
+    "lodash": "4.17.21",
     "winston": "3.3.3"
   }
 }
