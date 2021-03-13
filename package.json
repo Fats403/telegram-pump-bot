@@ -1,0 +1,25 @@
+{
+  "name": "telegram-pump-bot",
+  "version": "1.0.0",
+  "description": "This is a tool to watch for telegram pump groups for messages containing trade pairs which can then trigger a market buy of the trade pair with profit targets and a trailing stop loss.",
+  "main": "./src/index.js",
+  "scripts": {
+    "start": "node ./src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fats403/telegram-pump-bot.git"
+  },
+  "author": "Brayden Blackwell (@Fats403)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Fats403/telegram-pump-bot/issues"
+  },
+  "homepage": "https://github.com/Fats403/telegram-pump-bot#readme",
+  "dependencies": {
+    "@mtproto/core": "5.3.0",
+    "dotenv": "8.2.0",
+    "winston": "3.3.3"
+  }
+}
