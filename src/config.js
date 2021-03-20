@@ -4,15 +4,19 @@ module.exports = {
   telegramPhoneNumber: process.env.TELEGRAM_PHONE_NUMBER, // your telegram phone number in E.164 format
   telegramApiId: process.env.TELEGRAM_API_ID, // the API id from telegram
   telegramApiHash: process.env.TELEGRAM_API_HASH, // the API hash from telegram
-  chatTriggerIds: [521922047], // the chat group ID's that will trigger a trade, if empty it will watch every chat group
-  simulate: true, // if true, sends mock requests to exchange
+  channelTriggerIds: [], // the channel group ID's that will trigger a trade, if empty it will watch every channel group
+  simulate: false, // if true, sends mock requests to exchange
   exchange: "binance", // the exchange to use; aslong as it is a valid ccxt support exchnage ID (https://github.com/ccxt/ccxt)
   searchQuote: "BTC", // the trade pair quote's to search for
-  quoteAssetAmount: 0.0004, // the amount of quote we want to purchase when a trade pair is found
-  trailingStopPercent: 0.1, // trailing stop by percentage e.g. price * (1 - trailingStopPercent)
-  trailingStopUpdateIntveral: 1000, // how often we want to check for a new price to update the trailing stop loss
+  quoteAssetAmount: 0.0002, // the amount of quote to spend once a base has been found
+  trailingStopPercent: 0.08, // trailing stop by percentage e.g. price * (1 - trailingStopPercent)
+  trailingStopUpdateIntveral: 500, // (ms) how often we want to check for a new price to update the trailing stop loss
+  slippageTolerance: 0.01, // the percent of slippage tolerance to account for depending on market volatility
   profitTargets: [
-    { profitPercent: 0.05, sellAssetPercent: 0.5 }, // at 5% profit, sell 50%
-    { profitPercent: 0.1, sellAssetPercent: 0.5 }, // at 10% profit, sell 50%
+    { profitPercent: 0.05, sellBaseAssetPercent: 1 },
+    // { profitPercent: 0.25, sellBaseAssetPercent: 0.25 }, // at 25% profit, sell 25%
+    // { profitPercent: 0.5, sellBaseAssetPercent: 0.25 }, // at 50% profit, sell 25%
+    // { profitPercent: 0.75, sellBaseAssetPercent: 0.25 }, // at 75% profit, sell 25%
+    // { profitPercent: 1, sellBaseAssetPercent: 0.25 }, // at 100% profit, sell 25%
   ],
 };

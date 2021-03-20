@@ -8,9 +8,10 @@ const { BigNumber } = require("bignumber.js");
 const {
   getCurrentProfitPercentage,
   getLockedInProfitString,
+  getColoredString,
 } = require("./utils");
 const {
-  chatTriggerIds,
+  channelTriggerIds,
   exchange,
   searchQuote,
   quoteAssetAmount,
@@ -20,6 +21,7 @@ const {
   profitTargets,
   trailingStopPercent,
   trailingStopUpdateIntveral,
+  slippageTolerance,
 } = require("./config");
 const {
   sendCode,
@@ -42,9 +44,12 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
+readline.emitKeypressEvents(process.stdin);
+process.stdin.setRawMode(true);
+
 BigNumber.config({ DECIMAL_PLACES: 8 });
 
-let trailingStopPrice, initialTrailingStopPrice, base;
+let trailingStopPrice, initialTrailingStopPrice, currentTradeData;
 
 // TODO: make sure if it detects a new base, cancel listeners
 
@@ -91,13 +96,7 @@ let trailingStopPrice, initialTrailingStopPrice, base;
     `Successfully connected to telegram. Welcome, ${authResult.user.first_name}!`
   );
 
-  if (!chatTriggerIds.length) {
-    logger.info(`Actively watching all chat groups.`);
-  } else {
-    logger.info(
-      `Actively watching these chat groups. [${chatTriggerIds.toString()}]`
-    );
-  }
+  logger.info("Retrieving market data...");
 
   const markets = await exchangeClient.loadMarkets();
 
@@ -111,18 +110,40 @@ let trailingStopPrice, initialTrailingStopPrice, base;
     }
   });
 
-  telegram.updates.on("updateShortChatMessage", (data) => {
-    const { message, chat_id } = data;
+  logger.info("Successfully retrieved market data.");
+
+  if (!channelTriggerIds.length) {
+    logger.info(
+      `Actively watching all channel groups for a pair that can match with ${searchQuote} on ${exchange}.`
+    );
+  } else {
+    logger.info(
+      `Actively watching channel groups [${channelTriggerIds.toString()}] for a pair that can match with ${searchQuote} on ${exchange}.`
+    );
+  }
+
+  telegram.updates.on("updates", (data) => {
+    const { updates } = data;
+    const newChannelMessage = _.find(updates, ["_", "updateNewChannelMessage"]);
+
+    if (!newChannelMessage) return;
+
+    const {
+      message: {
+        message,
+        peer_id: { channel_id },
+      },
+    } = newChannelMessage;
 
     if (
-      chatTriggerIds &&
-      chatTriggerIds.length > 0 &&
-      chatTriggerIds.indexOf(chat_id) === -1
+      channelTriggerIds &&
+      channelTriggerIds.length > 0 &&
+      channelTriggerIds.indexOf(channel_id) === -1
     ) {
       return;
     }
 
-    logger.info(`New message (${chat_id}): ${message}`);
+    logger.info(`New message (${channel_id}): ${message}`);
 
     for (let i = 0; i < bases.length; i++) {
       const base = bases[i];
@@ -137,43 +158,61 @@ let trailingStopPrice, initialTrailingStopPrice, base;
 async function confirmTradeTrigger(baseAssetFound) {
   let baseBuyOrder;
   let confirm = await ask(
-    `BASE ASSET FOUND: ${baseAssetFound} (https://www.binance.com/en/trade/${base}_${searchQuote}), confirm trade (Y/N)? `
+    `BASE ASSET FOUND: (https://www.binance.com/en/trade/${baseAssetFound}_${searchQuote}) ${getColoredString(
+      baseAssetFound,
+      "yellow"
+    )} - confirm trade (Y/N)? `
   );
 
   if (confirm?.toLowerCase() === "y") {
-    // set the global base asset as the triggered base asset that was found
-    base = baseAssetFound;
+    // set the global base asset to the one that was just found from the telegram message
+    currentTradeData = {
+      base: baseAssetFound,
+    };
 
+    // create the buy order
     try {
       baseBuyOrder = await createMarketBuyOrder({
-        amount: new BigNumber(quoteAssetAmount),
+        base: baseAssetFound,
       });
     } catch (e) {
       logger.error(e.message);
       process.exit(1);
     }
 
-    // arm the trade with the amount and price of the purchased of the base asset found
-    armTrade({ amount: basebuyOrder.amount, price: basebuyOrder.price });
+    // add the purchase price and amount to the current trade data
+    currentTradeData = {
+      ...currentTradeData,
+      purchaseAmount: baseBuyOrder.amount,
+      purchasePrice: baseBuyOrder.price,
+    };
+
+    // arm the trade
+    armTrade();
   } else {
     logger.info("Exit process.");
     process.exit(1);
   }
 }
 
-async function armTrade({ amount, price }) {
+async function armTrade() {
+  // get the current trade amount and purchase price, convert to big numbers
+  let { purchaseAmount, purchasePrice } = currentTradeData;
+  purchaseAmount = new BigNumber(purchaseAmount);
+  purchasePrice = new BigNumber(purchasePrice);
+
   // book profit target orders
   try {
     profitTargetOrders = await bookProfitTargetOrders({
-      amount: new BigNumber(amount),
-      price: new BigNumber(price),
+      amount: purchaseAmount,
+      price: purchasePrice,
     });
   } catch (e) {
     throw new Error(e.message);
   }
 
   // set initial trailing stop values
-  initialTrailingStopPrice = getStopPrice(new BigNumber(price));
+  initialTrailingStopPrice = getStopPrice(purchasePrice);
   trailingStopPrice = initialTrailingStopPrice;
 
   // start to watch price for trailing stop loss price
@@ -185,7 +224,8 @@ const tick = async () => {
 
   logger.info(
     `PRICE: ${lastPrice}, CURRENT: ${getCurrentProfitPercentage(
-      lastPrice
+      lastPrice,
+      currentTradeData.purchasePrice
     )}, LOCKED: ${getLockedInProfitString(
       initialTrailingStopPrice,
       trailingStopPrice
@@ -204,6 +244,7 @@ const tick = async () => {
 // ---------------------------------------
 
 const getLastMarketPrice = async () => {
+  const { base } = currentTradeData;
   const { info } = await exchangeClient.fetchTicker(`${base}/${searchQuote}`);
   return new BigNumber(info.lastPrice);
 };
@@ -230,8 +271,6 @@ const triggerNewTrailingStopLimit = (price) => {
 };
 
 const triggerStopMarketLoss = async () => {
-  const amount = new BigNumber(quoteAssetAmount);
-
   try {
     await cancelAllOrders();
   } catch (e) {
@@ -242,7 +281,7 @@ const triggerStopMarketLoss = async () => {
 
   let order;
   try {
-    order = await createMarketSellOrder({ amount });
+    order = await createMarketSellOrder();
   } catch (e) {
     logger.error(e.message);
   }
@@ -253,19 +292,29 @@ const triggerStopMarketLoss = async () => {
 
 // ---------------------------------------
 
-async function createMarketBuyOrder({ amount }) {
+async function createMarketBuyOrder() {
   let order;
+  const { base } = currentTradeData;
+
+  // calculate how much of the base asset we can purchase with the quote asset specified in the config
+  const lastMarketPrice = await getLastMarketPrice();
+  let amount = new BigNumber(quoteAssetAmount).dividedBy(lastMarketPrice);
+
+  // apply the slippage tolerance
+  if (slippageTolerance) {
+    amount = amount.multipliedBy(1 - slippageTolerance).decimalPlaces(8);
+  }
+
   try {
-    order = await exchangeClient.createOrder(
+    order = await exchangeClient.createMarketBuyOrder(
       `${base}/${searchQuote}`,
-      "MARKET",
-      "buy",
       amount.toNumber(),
       {
         test: simulate ? true : undefined,
       }
     );
   } catch (e) {
+    console.log(e);
     throw new Error(`MARKET BUY order failed. ${e.message}`);
   }
 
@@ -274,11 +323,10 @@ async function createMarketBuyOrder({ amount }) {
 
 async function createLimitSellOrder({ amount, price }) {
   let order;
+  const { base } = currentTradeData;
   try {
-    order = await exchangeClient.createOrder(
+    order = await exchangeClient.createLimitSellOrder(
       `${base}/${searchQuote}`,
-      "LIMIT",
-      "sell",
       amount.toNumber(),
       price.toNumber(),
       {
@@ -293,14 +341,14 @@ async function createLimitSellOrder({ amount, price }) {
   return order;
 }
 
-async function createMarketSellOrder({ amount }) {
+async function createMarketSellOrder() {
   let order;
+  const { purchaseAmount, base } = currentTradeData;
+
   try {
-    order = await exchangeClient.createOrder(
+    order = await exchangeClient.createMarketSellOrder(
       `${base}/${searchQuote}`,
-      "MARKET",
-      "sell",
-      amount.toNumber(),
+      purchaseAmount,
       {
         test: simulate ? true : undefined,
       }
@@ -317,23 +365,29 @@ function bookProfitTargetOrders({ amount, price }) {
 
   for (let i = 0; i < profitTargets.length; i++) {
     const targetData = profitTargets[i];
-    const { sellBasePercent, profitPercent } = targetData;
+    const { sellBaseAssetPercent, profitPercent } = targetData;
 
-    const sellAmount = amount.multipliedBy(sellBasePercent);
+    const sellAmount = amount.multipliedBy(sellBaseAssetPercent);
     const profitTargetPrice = price.plus(price.multipliedBy(profitPercent));
 
-    orders.push(
-      createLimitSellOrder({
-        amount: sellAmount,
-        price: profitTargetPrice,
-      })
-    );
+    try {
+      orders.push(
+        createLimitSellOrder({
+          amount: sellAmount,
+          price: profitTargetPrice,
+        })
+      );
+    } catch (e) {
+      //TODO: cancel any open orders if it fails to set a profit target properly
+      throw new Error(e.message);
+    }
   }
 
   return Promise.all(orders);
 }
 
 async function cancelAllOrders() {
+  const { base } = currentTradeData;
   try {
     await exchangeClient.cancelAllOrders(`${base}/${searchQuote}`, {
       test: simulate ? true : undefined,

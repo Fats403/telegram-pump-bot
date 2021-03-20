@@ -4,25 +4,24 @@ const getLockedInProfitString = (
   initialTrailingStopPrice,
   trailingStopPrice
 ) => {
-  const { trailingStopPercentageDistance } = config;
+  const { trailingStopPercent } = config;
   const trailingStopPercentDifference = Number(
     ((trailingStopPrice.toNumber() - initialTrailingStopPrice.toNumber()) /
       initialTrailingStopPrice.toNumber()) *
       100
   ).toFixed(2);
-  const trailingStopPercent = trailingStopPercentageDistance * 100;
+  const trailingStopPercentDistance = trailingStopPercent * 100;
 
   let lockedInProfitPercentage = 0;
-  if (trailingStopPercentDifference > trailingStopPercent) {
+  if (trailingStopPercentDifference > trailingStopPercentDistance) {
     lockedInProfitPercentage =
-      trailingStopPercentDifference - trailingStopPercent;
+      trailingStopPercentDifference - trailingStopPercentDistance;
   }
 
   return getColoredPercentageString(lockedInProfitPercentage);
 };
 
-const getCurrentProfitPercentage = (lastPrice) => {
-  const { purchasePrice } = config;
+const getCurrentProfitPercentage = (lastPrice, purchasePrice) => {
   const currentProfitPercentage = Number(
     ((lastPrice.toNumber() - purchasePrice) / purchasePrice) * 100
   ).toFixed(2);
@@ -34,15 +33,32 @@ const getColoredPercentageString = (percentage) => {
   const percentString = `${percentage}%`;
 
   if (percentage > 0) {
-    return "\033[32m" + percentString + "\033[0m";
+    return getColoredString(percentString, "green");
   } else if (percentage < 0) {
-    return "\033[31m" + percentString + "\033[0m";
+    return getColoredString(percentString, "red");
   }
 
   return percentString;
 };
 
+const colors = {
+  black: "\033[30m",
+  red: "\033[31m",
+  green: "\033[32m",
+  yellow: "\033[33m",
+  blue: "\033[34m",
+  magenta: "\033[35m",
+  cyan: "\033[36m",
+  white: "\033[37m",
+};
+
+const getColoredString = (text, color = "white") => {
+  if (!text || typeof text !== "string") return;
+  return colors[color] + text + "\033[0m";
+};
+
 module.exports = {
+  getColoredString,
   getLockedInProfitString,
   getCurrentProfitPercentage,
   getColoredPercentageString,
