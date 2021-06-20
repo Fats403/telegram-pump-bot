@@ -49,7 +49,8 @@ process.stdin.setRawMode(true);
 
 BigNumber.config({ DECIMAL_PLACES: 8 });
 
-let trailingStopPrice, initialTrailingStopPrice, currentTradeData;
+let confirmingTrade = false;
+let trailingStopPrice, initialTrailingStopPrice, currentTradeData, ticker;
 
 // TODO: make sure if it detects a new base, cancel listeners
 
@@ -126,7 +127,9 @@ let trailingStopPrice, initialTrailingStopPrice, currentTradeData;
     const { updates } = data;
     const newChannelMessage = _.find(updates, ["_", "updateNewChannelMessage"]);
 
-    if (!newChannelMessage) return;
+    console.log(updates);
+
+    if (!newChannelMessage || confirmingTrade) return;
 
     const {
       message: {
@@ -156,8 +159,10 @@ let trailingStopPrice, initialTrailingStopPrice, currentTradeData;
 })();
 
 async function confirmTradeTrigger(baseAssetFound) {
-  let baseBuyOrder;
-  let confirm = await ask(
+  // set a flag so we disregard any other messages so there is no override
+  confirmingTrade = true;
+
+  const confirm = await ask(
     `BASE ASSET FOUND: (https://www.binance.com/en/trade/${baseAssetFound}_${searchQuote}) ${getColoredString(
       baseAssetFound,
       "yellow"
@@ -171,10 +176,9 @@ async function confirmTradeTrigger(baseAssetFound) {
     };
 
     // create the buy order
+    let baseBuyOrder;
     try {
-      baseBuyOrder = await createMarketBuyOrder({
-        base: baseAssetFound,
-      });
+      baseBuyOrder = await createMarketBuyOrder();
     } catch (e) {
       logger.error(e.message);
       process.exit(1);
@@ -189,8 +193,11 @@ async function confirmTradeTrigger(baseAssetFound) {
 
     // arm the trade
     armTrade();
+  } else if (confirm?.toLowerCase() === "n") {
+    confirmingTrade = false;
+    logger.info("Resuming watch..");
   } else {
-    logger.info("Exit process.");
+    logger.info("Exiting Process.");
     process.exit(1);
   }
 }
@@ -216,7 +223,7 @@ async function armTrade() {
   trailingStopPrice = initialTrailingStopPrice;
 
   // start to watch price for trailing stop loss price
-  setInterval(tick, trailingStopUpdateIntveral);
+  ticker = setInterval(tick, trailingStopUpdateIntveral);
 }
 
 const tick = async () => {
@@ -271,6 +278,9 @@ const triggerNewTrailingStopLimit = (price) => {
 };
 
 const triggerStopMarketLoss = async () => {
+  // stop the ticker
+  clearInterval(ticker);
+
   try {
     await cancelAllOrders();
   } catch (e) {
